@@ -1,0 +1,74 @@
+name: Windows Cloud PC - Windows App (Tailscale)
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Criando Cloud PC
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: 1. Otimizar Sistema e Desempenho
+        run: |
+          powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
+          reg add "HKCU\Control Panel\Desktop" /v UserPreferencesMask /t REG_BINARY /d 9012038010000000 /f
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /v fDisableCam /t REG_DWORD /d 0 /f
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 1 /f
+          Write-Host "Otimizações de desempenho aplicadas."
+
+      - name: 2. Habilitar RDP e Configurar Senha
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+
+          $admin = [ADSI]"WinNT://./runneradmin,user"
+          $admin.SetPassword("Senha123456!")
+          Write-Host "RDP habilitado."
+
+      - name: 3. Instalar e Conectar no Tailscale
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          if (-not $env:TAILSCALE_AUTHKEY) {
+            Write-Host "===========================================================" -ForegroundColor Red
+            Write-Host "ERRO: O Secret 'TAILSCALE_AUTHKEY' não foi configurado!" -ForegroundColor Red
+            Write-Host "Siga o Passo 2 para adicionar a chave nas configurações do GitHub." -ForegroundColor Red
+            Write-Host "===========================================================" -ForegroundColor Red
+            exit 1
+          }
+
+          # Instala o Tailscale via Chocolatey
+          choco install tailscale -y
+
+          # Aguarda instalação e inicia o serviço
+          Start-Sleep -Seconds 5
+          $tailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
+
+          # Autentica e junta a máquina virtual na sua rede Tailscale
+          & $tailscaleExe up --authkey=$env:TAILSCALE_AUTHKEY --hostname="github-cloud-pc"
+
+          # Obtém o IP privado gerado na rede Tailscale
+          Start-Sleep -Seconds 5
+          $tailscaleIP = & $tailscaleExe ip -4
+
+          Write-Host ""
+          Write-Host "==========================================================" -ForegroundColor Green
+          Write-Host "   SISTEMA CONECTADO À SUA REDE TAILSCALE!" -ForegroundColor Green
+          Write-Host "==========================================================" -ForegroundColor Green
+          Write-Host " IP DO PC (OU NOME) : $tailscaleIP (ou github-cloud-pc)" -ForegroundColor Yellow
+          Write-Host " USUÁRIO            : runneradmin" -ForegroundColor Yellow
+          Write-Host " SENHA              : Senha123456!" -ForegroundColor Yellow
+          Write-Host "==========================================================" -ForegroundColor Green
+          Write-Host ""
+
+      - name: 4. Manter PC Virtual Ligado
+        run: |
+          $tempoMaximo = 350 * 60
+          $contador = 0
+          while ($contador -lt $tempoMaximo) {
+            Start-Sleep -Seconds 60
+            $contador += 60
+          }
+          
